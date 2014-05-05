@@ -225,3 +225,6 @@ pip-log.txt
 
 #Mr Developer
 .mr.developer.cfg
+*.xml
+OS14_Ex5/nbproject/private/timestamps-linuxdevenv.cloudapp.net-y0n1-22
+OS14_Ex5/nbproject/private/timestamps-ubuntu-vm-y0n1-22
