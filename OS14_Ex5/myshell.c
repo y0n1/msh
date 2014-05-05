@@ -12,7 +12,9 @@
 
 #define COMMAND_MAX_LENGTH 256
 #define MAX_COMMANDS_COUNT 16
+#define NEWLINE_CHAR '\n'
 #define NULL_CHAR '\0'
+#define PIPE_CHAR '|'
 #define AMP_CHAR '&'
 #define AMP_STR "&"
 #define SPACE_STR " "
@@ -20,6 +22,7 @@
 #define EXIT_CMD_STR "exit"
 #define COMMAND_PROMPT_STR "> "
 #define GOOD_BYE_MSG "\nThank you for using my shell!\n"
+#define BAD_SYNTAX_NEAR_TOKEN "%s: syntax error near unexpected token `%c'\n"
 
 typedef enum {
 	false,
@@ -52,8 +55,8 @@ size_t trim_ws(char *i_String) {
 		end--;
 	}
 
-	/* Write new null terminator */
-	*(end + 1) = 0;
+	/* Write string terminator */
+	*(end + 1) = NULL_CHAR;
 
 	return strlen(i_String);
 }
@@ -61,23 +64,24 @@ size_t trim_ws(char *i_String) {
 /**
  * Checks if the given string is not the empty string.
  */
-bool is_not_empty_string(char *i_String) {
+bool is_not_empty_string(const char *i_String) {
 	return strcmp(i_String, SPACE_STR) != 0;
 }
 
 /**
- * Parses a string into tokens using the given delimiter.
+ * Parses a string (i_FullCmd) into and array of tokens (o_CmdsArray).
  */
-size_t get_tokens(char *i_FullCmd, char **o_CmdsArray) {
+size_t get_tokens(char *i_FullCmd, const char *i_Delimiter, char **o_CmdsArray) {
 	char *token = NULL;
 	size_t size = 0;
+	size_t tokenLength = 0;
 
-	token = strtok(i_FullCmd, AMP_STR);
+	token = strtok(i_FullCmd, i_Delimiter);
 	while (token != NULL) {
-		trim_ws(token);
+		tokenLength = trim_ws(token);
 		if (is_not_empty_string(token)) {
 			/* store each command in its own cell */
-			o_CmdsArray[size] = malloc((strlen(token) + 1) * sizeof (char));
+			o_CmdsArray[size] = malloc((tokenLength + 1) * sizeof (char));
 			strcpy(o_CmdsArray[size++], token);
 		}
 		/* retrieve the next token */
@@ -94,10 +98,10 @@ size_t get_tokens(char *i_FullCmd, char **o_CmdsArray) {
  * Gets a full-command and returns only the command without its arguments.
  * This function allocates memory for the returned string!
  */
-char *get_command(const char *c_Cmd) {
-	char *buffer = malloc((strlen(c_Cmd) + 1) * sizeof(char));
+char *get_command(const char *i_Cmd) {
+	char *buffer = malloc((strlen(i_Cmd) + 1) * sizeof (char));
 
-	strcpy(buffer, c_Cmd);
+	strcpy(buffer, i_Cmd);
 	strtok(buffer, SPACE_STR);
 
 	return buffer;
@@ -108,7 +112,7 @@ char *get_command(const char *c_Cmd) {
  * This function allocates memory for the returned string!
  */
 char *get_arguments(const char *c_Cmd) {
-	char *buffer = malloc((strlen(c_Cmd) + 1) * sizeof(char));
+	char *buffer = malloc((strlen(c_Cmd) + 1) * sizeof (char));
 
 	strcpy(buffer, c_Cmd);
 	while (isspace(*buffer)) {
@@ -128,20 +132,28 @@ bool is_child(pid_t i_Pid) {
 /**
  * Executes a process, possibly in background.
  */
-int execute(char *i_CmdsArray[], bool i_Background) {
-	pid_t pid;
-	int status;
+int execute(char *command, bool i_runsInBackground) {
+	pid_t pid = 0;
+	int status = 0;
+	char *commandName = get_command(command);
+	char **argv;
 
-	pid = fork();
-	if (is_child(pid)) {
-		execvp(i_CmdsArray[0], i_CmdsArray);
-		exit(EXIT_FAILURE);
-	} else if (i_Background) {
-		waitpid(pid, &status, 0);
-		return WEXITSTATUS(status);
+	get_tokens(command, SPACE_STR, argv);
+	if (i_runsInBackground) {
+		pid = fork();
+		if (is_child(pid)) {
+			execvp(commandName, argv);
+			fprintf(stderr, "ERROR: cannot start program %s\n", commandName);
+			return EXIT_FAILURE;
+		} else {
+			printf("[1] %d\n", pid);
+			waitpid(pid, &status, 0);
+		}
 	} else {
-		return EXIT_SUCCESS;
+		execvp(commandName, argv);
 	}
+
+	return WEXITSTATUS(status);
 }
 
 /**
@@ -155,7 +167,11 @@ bool is_not_exit(const char *i_Cmd) {
  * Detects the 'cd' command
  */
 bool is_chdir(const char *i_Cmd) {
-	return strcmp(CD_CMD_STR, get_command(i_Cmd)) == 0;
+	char *cmdName = get_command(i_Cmd);
+	bool result = strcmp(cmdName, CD_CMD_STR) == 0;
+	free(cmdName);
+
+	return result;
 }
 
 /**
@@ -180,17 +196,25 @@ size_t read_cmd(char *io_Buffer, bool *o_BgFlagStatus) {
 	return strlen(io_Buffer);
 }
 
+void free_all(char **arr, size_t lenArr) {
+	int i;
+
+	for (i = 0; i < lenArr; i++) {
+		free(arr[i]);
+	}
+}
+
 /**
  * main function.
  */
-int main() {
+int main(int argc, char **argv) {
 	bool bgFlag = false;
 	size_t cmdsArraySize = 0;
+	size_t argsArraySize = 0;
 	char *currentCommand = NULL;
-	char fullCmd[COMMAND_MAX_LENGTH] = {NULL_CHAR};
+	char fullCmd[COMMAND_MAX_LENGTH];
 	char *cmdsArray[MAX_COMMANDS_COUNT];
-	char *args[COMMAND_MAX_LENGTH];
-	int index = 0;
+	int index;
 
 	// main shell loop.
 	while (is_not_exit(fullCmd)) {
@@ -201,8 +225,19 @@ int main() {
 		// reads the command and sets the background flag
 		read_cmd(fullCmd, &bgFlag);
 
-		// taking the entire command into an array
-		cmdsArraySize = get_tokens(fullCmd, cmdsArray);
+		/* Check for invalid tokens */
+		if (*fullCmd == AMP_CHAR || *fullCmd == PIPE_CHAR) {
+			printf(BAD_SYNTAX_NEAR_TOKEN, argv[0], *fullCmd);
+			continue;
+		}
+
+		/* If user just pressed enter then skip */
+		if (*fullCmd == NEWLINE_CHAR) {
+			continue;
+		}
+
+		// read the entire command into an array
+		cmdsArraySize = get_tokens(fullCmd, AMP_STR, cmdsArray);
 
 		// process the parsed input of commands
 		for (index = 0; index < cmdsArraySize; ++index) {
@@ -219,12 +254,10 @@ int main() {
 				chdir(get_arguments(currentCommand));
 			}
 
-			// break the entire command into args structure.
-			get_tokens(currentCommand, args);
-
 			// runs the command.
-			execute(args, bgFlag);
+			execute(currentCommand, bgFlag);
 		}
+		free_all(cmdsArray, cmdsArraySize);
 	}
 	printf(GOOD_BYE_MSG);
 
