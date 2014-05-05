@@ -128,7 +128,7 @@ bool is_child(pid_t i_Pid) {
 /**
  * Executes a process, possibly in background.
  */
-int execute(const char **i_CmdsArray, bool i_Background) {
+int execute(char *i_CmdsArray[], bool i_Background) {
 	pid_t pid;
 	int status;
 
@@ -159,17 +159,6 @@ bool is_chdir(const char *i_Cmd) {
 }
 
 /**
- * Reads the next command from the command line.
- */
-size_t read_cmd(char *io_Buffer, bool *o_BgFlagStatus) {
-	fgets(io_Buffer, COMMAND_MAX_LENGTH, stdin);
-	trim_ws(io_Buffer);
-	o_BgFlagStatus = has_bg_flag(io_Buffer);
-
-	return strlen(io_Buffer);
-}
-
-/**
  * Checks if the last character in i_CmdBuffer is '&'. This function assumes
  * that the string i_CmdBuffer has been trimmed properly already.
  */
@@ -177,7 +166,18 @@ bool has_bg_flag(const char *i_CmdBuffer) {
 	size_t length = strlen(i_CmdBuffer);
 	char lastChar = *(i_CmdBuffer + length - 1);
 
-	return strcmp(lastChar, AMP_CHAR) == 0;
+	return lastChar == AMP_CHAR;
+}
+
+/**
+ * Reads the next command from the command line.
+ */
+size_t read_cmd(char *io_Buffer, bool *o_BgFlagStatus) {
+	fgets(io_Buffer, COMMAND_MAX_LENGTH, stdin);
+	trim_ws(io_Buffer);
+	*o_BgFlagStatus = has_bg_flag(io_Buffer);
+
+	return strlen(io_Buffer);
 }
 
 /**
@@ -210,7 +210,7 @@ int main() {
 
 			// checks if exit received.
 			if (!is_not_exit(currentCommand)) {
-				fullCmd = currentCommand;
+				strcpy(fullCmd, currentCommand);
 				break;
 			}
 
@@ -219,7 +219,7 @@ int main() {
 				chdir(get_arguments(currentCommand));
 			}
 
-			// break the entire command to argv structure.
+			// break the entire command into args structure.
 			get_tokens(currentCommand, args);
 
 			// runs the command.
